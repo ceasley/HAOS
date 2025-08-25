@@ -1,0 +1,57 @@
+blueprint:
+  name: Door Left Open → Notify (and optional relock)
+  description: >
+    Sends a notification when a door is left open for a set time. Optionally re-locks a lock
+    after notifying (useful for entry doors at night).
+  domain: automation
+  input:
+    door_sensor:
+      name: Door contact sensor
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+    open_minutes:
+      name: Minutes open before alert
+      default: 5
+      selector:
+        number: {min: 1, max: 60, unit_of_measurement: "min", mode: slider}
+    notify_service:
+      name: Notification service (e.g., notify.mobile_app_chads_iphone)
+      selector:
+        text: {}
+    lock_entity:
+      name: (Optional) Lock to relock after alert
+      default: ""
+      selector:
+        entity:
+          domain: lock
+          multiple: false
+
+mode: single
+
+variables:
+  door_sensor_entity: !input door_sensor
+  lock_entity_var: !input lock_entity
+
+trigger:
+  - platform: state
+    entity_id: !input door_sensor
+    to: "on"
+    for:
+      minutes: !input open_minutes
+
+action:
+  - service: !input notify_service
+    data:
+      title: "Door left open"
+      message: >
+        {{ state_attr(door_sensor_entity, 'friendly_name') or door_sensor_entity }} has been open for {{ (states('input_number.open_minutes') if states('input_number.open_minutes') != 'unknown' else '') or '' }} minutes.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ (lock_entity_var | string) | length > 0 }}"
+        sequence:
+          - service: lock.lock
+            target:
+              entity_id: !input lock_entity

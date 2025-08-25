@@ -1,0 +1,68 @@
+blueprint:
+  name: Leak Alert → Notify + Optional Shutoff
+  description: >
+    When any selected leak sensor detects water, send notifications and optionally turn off a shutoff switch/valve
+    and flash a warning light group.
+  domain: automation
+  input:
+    leak_sensors:
+      name: Leak sensors
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: moisture
+          multiple: true
+    notify_service:
+      name: Notification service (e.g., notify.notify or notify.all_phones)
+      selector:
+        text: {}
+    shutoff_switch:
+      name: (Optional) Shutoff switch/valve entity
+      default: ""
+      selector:
+        entity:
+          domain: switch
+    warn_light_group:
+      name: (Optional) Light or light group to flash
+      default: ""
+      selector:
+        entity:
+          domain: light
+
+mode: parallel
+
+variables:
+  shutoff_switch_var: !input shutoff_switch
+  warn_light_var: !input warn_light_group
+
+trigger:
+  - platform: state
+    entity_id: !input leak_sensors
+    to: "on"
+
+action:
+  - service: !input notify_service
+    data:
+      title: "WATER LEAK DETECTED"
+      message: >
+        {{ trigger.to_state.name or trigger.entity_id }} is reporting a water leak.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ (shutoff_switch_var | string) | length > 0 }}"
+        sequence:
+          - service: switch.turn_off
+            target: { entity_id: !input shutoff_switch }
+      - conditions:
+          - condition: template
+            value_template: "{{ (warn_light_var | string) | length > 0 }}"
+        sequence:
+          - repeat:
+              count: 4
+              sequence:
+                - service: light.turn_on
+                  target: { entity_id: !input warn_light_group }
+                - delay: "00:00:02"
+                - service: light.turn_off
+                  target: { entity_id: !input warn_light_group }
+                - delay: "00:00:02"

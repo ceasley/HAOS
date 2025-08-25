@@ -1,0 +1,96 @@
+blueprint:
+  name: Bathroom Humidity Fan (smart on/off with hysteresis)
+  description: >
+    Turns ON a bathroom exhaust fan when humidity is high, then turns it OFF after humidity
+    drops back below a threshold for a sustained period. Includes minimum run-time to prevent
+    short cycling. Works with any humidity sensor + fan entity.
+  domain: automation
+  input:
+    humidity_sensor:
+      name: Humidity sensor
+      selector:
+        entity:
+          domain: sensor
+          device_class: humidity
+    fan_entity:
+      name: Fan
+      selector:
+        entity:
+          domain: fan
+    on_threshold:
+      name: Humidity ON threshold (%)
+      default: 60
+      selector:
+        number: {min: 30, max: 100, unit_of_measurement: "%", mode: slider}
+    off_threshold:
+      name: Humidity OFF threshold (%)
+      description: "Fan will turn OFF when humidity <= this value for 'off_sustain' minutes."
+      default: 55
+      selector:
+        number: {min: 20, max: 100, unit_of_measurement: "%", mode: slider}
+    off_sustain:
+      name: OFF sustain (minutes)
+      description: "How long humidity must stay below 'off_threshold' before turning OFF."
+      default: 10
+      selector:
+        number: {min: 1, max: 60, unit_of_measurement: "min", mode: slider}
+    min_runtime:
+      name: Minimum run-time (minutes)
+      description: "Guarantee the fan runs at least this long once turned ON."
+      default: 8
+      selector:
+        number: {min: 1, max: 60, unit_of_measurement: "min", mode: slider}
+
+mode: single
+
+# Give names to inputs for use inside templates
+variables:
+  humidity_sensor: !input humidity_sensor
+  fan_entity: !input fan_entity
+  on_thr: !input on_threshold
+  off_thr: !input off_threshold
+  off_for: !input off_sustain
+  min_run: !input min_runtime
+
+# Two clean triggers with debouncing
+trigger:
+  - id: rise
+    platform: numeric_state
+    entity_id: !input humidity_sensor
+    above: !input on_threshold
+    for: "00:01:00"
+  - id: fall
+    platform: numeric_state
+    entity_id: !input humidity_sensor
+    below: !input off_threshold
+    for:
+      minutes: !input off_sustain
+
+condition: []
+
+action:
+  - choose:
+      # --- Turn ON path ---
+      - conditions:
+          - condition: template
+            value_template: "{{ (states(humidity_sensor) | float(0)) >= (on_thr | float) }}"
+          - condition: template
+            value_template: "{{ is_state(fan_entity, 'off') }}"
+        sequence:
+          - service: fan.turn_on
+            target:
+              entity_id: !input fan_entity
+
+      # --- Turn OFF path (respect min_run) ---
+      - conditions:
+          - condition: template
+            value_template: "{{ (states(humidity_sensor) | float(0)) <= (off_thr | float) }}"
+          - condition: template
+            value_template: "{{ is_state(fan_entity, 'on') }}"
+          - condition: template
+            value_template: >
+              {{ (as_timestamp(now()) - as_timestamp(states[fan_entity].last_changed)) / 60 >= (min_run | float) }}
+        sequence:
+          - service: fan.turn_off
+            target:
+              entity_id: !input fan_entity
